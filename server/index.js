@@ -134,10 +134,10 @@ JSON SCHEMA:
 }`;
 
     const MODEL_CHAIN = [
-      'llama-3.3-70b-versatile',
-      'llama-3.1-8b-instant',
-      'mixtral-8x7b-32768'
-    ];
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'openai/gpt-oss-120b'
+];
 
     let tripData = null;
 
@@ -176,7 +176,12 @@ JSON SCHEMA:
         console.log(`[${modelName}] Status: ${groqRes.status}`);
 
         if (groqRes.status === 429) continue;
-        if (!groqRes.ok) continue;
+
+if (!groqRes.ok) {
+  const errorText = await groqRes.text();
+  console.log(`[${modelName}] Error response:`, errorText);
+  continue;
+}
 
         const result = await groqRes.json();
         const content = result.choices?.[0]?.message?.content;
