@@ -71,9 +71,19 @@ async function fetchActivityDetails(activity, locationContext) {
 
   activity.image = imageUrl;
 
-  if (!activity.coords || (activity.coords[0] === 0 && activity.coords[1] === 0)) {
-    activity.coords = await geocodePlace(placeName, locationContext);
-  }
+  const coords = activity.coords;
+
+const validCoords =
+  Array.isArray(coords) &&
+  coords.length === 2 &&
+  coords.every(
+    n => typeof n === 'number' && Number.isFinite(n)
+  ) &&
+  !(coords[0] === 0 && coords[1] === 0);
+
+if (!validCoords) {
+  activity.coords = await geocodePlace(placeName, locationContext);
+}
 
   return activity;
 }
