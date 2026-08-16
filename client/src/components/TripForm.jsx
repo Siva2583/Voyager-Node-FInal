@@ -64,9 +64,9 @@ function TripForm() {
             setLoad(true);
             navigate('/loading', { replace: true });
             
-            const response = await axios.post("/api/generate", tripdata, {
-                timeout: 100000 
-            });
+            const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/generate`, tripdata, {
+    timeout: 100000 
+});
             
             setLoad(false);
             navigate('/result', {
