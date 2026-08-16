@@ -177,7 +177,7 @@ JSON SCHEMA:
                 }
               ],
               temperature: 0.1,
-              max_tokens: 4500,
+              max_completion_tokens: 4500,
               response_format: { type: 'json_object' }
             })
           }
