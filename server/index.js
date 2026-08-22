@@ -23,6 +23,41 @@ app.get('/api/debug-env', (req, res) => {
   });
 });
 
+app.get('/api/debug-geocode', async (req, res) => {
+  const place = req.query.place || 'Baga Beach';
+  const locationContext = req.query.location || 'Goa';
+  const result = { place, locationContext };
+
+  try {
+    const centerUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&city=${encodeURIComponent(locationContext)}&country=India&format=json&limit=1`;
+    const centerRes = await fetchWithTimeout(centerUrl);
+    result.centerStatus = centerRes.status;
+    result.centerBody = await centerRes.text();
+  } catch (e) {
+    result.centerError = e.message;
+  }
+
+  try {
+    const placeUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(place + ', ' + locationContext)}&format=json&limit=1&countrycodes=in`;
+    const placeRes = await fetchWithTimeout(placeUrl);
+    result.placeStatus = placeRes.status;
+    result.placeBody = await placeRes.text();
+  } catch (e) {
+    result.placeError = e.message;
+  }
+
+  try {
+    const pexelsUrl = `https://api.pexels.com/v1/search?query=${encodeURIComponent('india travel landmark scenery')}&per_page=1`;
+    const pexelsRes = await fetchWithTimeout(pexelsUrl, { headers: { Authorization: PEXELS_KEY } });
+    result.pexelsStatus = pexelsRes.status;
+    result.pexelsBody = await pexelsRes.text();
+  } catch (e) {
+    result.pexelsError = e.message;
+  }
+
+  res.json(result);
+});
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
