@@ -76,10 +76,10 @@ async function geocodePlace(placeName, locationContext, destinationCenter) {
     const cleanQuery = placeName.split('(')[0].trim();
     const query = `${cleanQuery}, ${locationContext}`;
 
-    let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1`;
+    let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=in`;
 
     if (destinationCenter) {
-      const viewbox = buildViewbox(destinationCenter);
+      const viewbox = buildViewbox(destinationCenter, 20);
       url += `&viewbox=${viewbox}&bounded=1`;
     }
 
@@ -97,7 +97,7 @@ async function geocodePlace(placeName, locationContext, destinationCenter) {
 
       if (destinationCenter) {
         const distanceKm = haversineDistanceKm(coords, destinationCenter);
-        if (distanceKm > 100) {
+        if (distanceKm > 20) {
           return null;
         }
       }
