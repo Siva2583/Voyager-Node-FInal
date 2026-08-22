@@ -55,7 +55,7 @@ const LOCATIONIQ_KEY = process.env.LOCATIONIQ_KEY;
 async function geocodeDestinationCenter(locationContext) {
   if (!LOCATIONIQ_KEY) return null;
   try {
-    const url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(locationContext)}&format=json&limit=1`;
+    const url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&city=${encodeURIComponent(locationContext)}&country=India&format=json&limit=1`;
     const response = await fetchWithTimeout(url);
 
     if (!response.ok) return null;
@@ -63,6 +63,14 @@ async function geocodeDestinationCenter(locationContext) {
     const data = await response.json();
     if (data && data.length > 0) {
       return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+    }
+
+    const fallbackUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(locationContext)}&format=json&limit=1&countrycodes=in`;
+    const fallbackResponse = await fetchWithTimeout(fallbackUrl);
+    if (!fallbackResponse.ok) return null;
+    const fallbackData = await fallbackResponse.json();
+    if (fallbackData && fallbackData.length > 0) {
+      return [parseFloat(fallbackData[0].lat), parseFloat(fallbackData[0].lon)];
     }
   } catch (e) {
     console.log('[geocodeDestinationCenter] failed:', e.message);
