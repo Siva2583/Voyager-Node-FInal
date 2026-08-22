@@ -15,183 +15,77 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+async function fetchWikipediaImage(placeName) {
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function haversineDistanceKm([lat1, lon1], [lat2, lon2]) {
-  const toRad = (d) => (d * Math.PI) / 180;
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-function buildViewbox([lat, lon], spanKm = 40) {
-  const latSpan = spanKm / 111;
-  const lonSpan = spanKm / (111 * Math.cos((lat * Math.PI) / 180) || 1);
-  const lonMin = lon - lonSpan;
-  const lonMax = lon + lonSpan;
-  const latMin = lat - latSpan;
-  const latMax = lat + latSpan;
-  return `${lonMin},${latMax},${lonMax},${latMin}`;
-}
-
-const LOCATIONIQ_KEY = process.env.LOCATIONIQ_KEY;
-
-async function geocodeDestinationCenter(locationContext) {
-  if (!LOCATIONIQ_KEY) return null;
-  try {
-    const url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(locationContext)}&format=json&limit=1`;
-    const response = await fetchWithTimeout(url);
-
-    if (!response.ok) return null;
-
+    const cleanQuery = placeName.split('(')[0].trim();
+    const url = `https://en.wikipedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch=${encodeURIComponent(cleanQuery)}&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=800`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'VoyagerAI/1.0' }
+    });
     const data = await response.json();
-    if (data && data.length > 0) {
-      return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+    const pages = data?.query?.pages;
+
+    if (pages) {
+      for (const key of Object.keys(pages)) {
+        if (pages[key]?.thumbnail?.source) {
+          return pages[key].thumbnail.source;
+        }
+      }
     }
-  } catch (e) {
-    console.log('[geocodeDestinationCenter] failed:', e.message);
-  }
+  } catch (e) {}
+
   return null;
 }
 
-async function geocodePlace(placeName, locationContext, destinationCenter) {
-  if (!LOCATIONIQ_KEY) return null;
+async function geocodePlace(placeName, locationContext) {
   try {
     const cleanQuery = placeName.split('(')[0].trim();
     const query = `${cleanQuery}, ${locationContext}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
 
-    let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=in`;
-
-    if (destinationCenter) {
-      const viewbox = buildViewbox(destinationCenter, 20);
-      url += `&viewbox=${viewbox}&bounded=1`;
-    }
-
-    let response = await fetchWithTimeout(url);
-    let data = response.ok ? await response.json() : null;
-
-    if ((!data || data.length === 0) && destinationCenter) {
-      const unboundedUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1`;
-      response = await fetchWithTimeout(unboundedUrl);
-      data = response.ok ? await response.json() : null;
-    }
-
-    if (data && data.length > 0) {
-      const coords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-
-      if (destinationCenter) {
-        const distanceKm = haversineDistanceKm(coords, destinationCenter);
-        if (distanceKm > 20) {
-          return null;
-        }
-      }
-
-      return coords;
-    }
-  } catch (e) {
-    console.log('[geocodePlace] failed for', placeName, ':', e.message);
-  }
-
-  return null;
-}
-
-const PEXELS_KEY = process.env.PEXELS_API_KEY;
-
-const CATEGORY_KEYWORDS = [
-  { match: /hotel|resort|stay|inn|lodge/i, query: 'hotel room interior' },
-  { match: /restaurant|cafe|dhaba|biryani|kitchen|eatery/i, query: 'indian restaurant food' },
-  { match: /temple|mandir|shrine/i, query: 'hindu temple architecture' },
-  { match: /fort|palace|mahal/i, query: 'indian palace architecture' },
-  { match: /beach|coast/i, query: 'india beach coastline' },
-  { match: /museum|gallery/i, query: 'museum interior exhibit' },
-  { match: /market|bazaar/i, query: 'indian street market' },
-  { match: /park|garden/i, query: 'india public garden' }
-];
-
-function guessCategoryQuery(placeName, desc) {
-  const haystack = `${placeName} ${desc || ''}`;
-  for (const entry of CATEGORY_KEYWORDS) {
-    if (entry.match.test(haystack)) return entry.query;
-  }
-  return 'india travel destination';
-}
-
-async function fetchPexelsImage(query) {
-  if (!PEXELS_KEY) return null;
-  try {
-    const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1&orientation=landscape`;
-    const response = await fetchWithTimeout(url, {
-      headers: { Authorization: PEXELS_KEY }
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'VoyagerAI/1.0' }
     });
 
-    if (!response.ok) return null;
-
     const data = await response.json();
-    const photo = data?.photos?.[0];
-    return photo?.src?.large || photo?.src?.medium || null;
-  } catch (e) {
-    console.log('[fetchPexelsImage] failed for', query, ':', e.message);
-  }
-  return null;
+
+    if (data && data.length > 0) {
+      return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+    }
+  } catch (e) {}
+
+  return [0.0, 0.0];
 }
 
-async function fetchActivityImage(activity) {
-  const categoryQuery = guessCategoryQuery(activity.place, activity.desc);
-  const image = await fetchPexelsImage(categoryQuery);
-  return image || 'https://images.pexels.com/photos/1051073/pexels-photo-1051073.jpeg';
-}
-
-async function fetchActivityDetails(activity, locationContext, destinationCenter) {
+async function fetchActivityDetails(activity, locationContext) {
   const placeName = activity.place;
 
   if (!placeName) return activity;
 
-  activity.image = await fetchActivityImage(activity);
+  let imageUrl = await fetchWikipediaImage(placeName);
+
+  if (!imageUrl) {
+    const cleanQuery = placeName.split('(')[0].trim();
+    imageUrl = `https://loremflickr.com/800/600/${cleanQuery.replace(/ /g, ',')},travel/all`;
+  }
+
+  activity.image = imageUrl;
 
   const coords = activity.coords;
 
-  const validCoords =
-    Array.isArray(coords) &&
-    coords.length === 2 &&
-    coords.every((n) => typeof n === 'number' && Number.isFinite(n)) &&
-    !(coords[0] === 0 && coords[1] === 0);
+const validCoords =
+  Array.isArray(coords) &&
+  coords.length === 2 &&
+  coords.every(
+    n => typeof n === 'number' && Number.isFinite(n)
+  ) &&
+  !(coords[0] === 0 && coords[1] === 0);
 
-  if (!validCoords) {
-    const geocoded = await geocodePlace(placeName, locationContext, destinationCenter);
-    activity.coords = geocoded || destinationCenter || null;
-  }
-
-  return activity;
+if (!validCoords) {
+  activity.coords = await geocodePlace(placeName, locationContext);
 }
 
-async function enrichActivitiesSequentially(activities, locationContext, destinationCenter) {
-  const results = [];
-  for (const activity of activities) {
-    try {
-      results.push(await fetchActivityDetails(activity, locationContext, destinationCenter));
-    } catch (e) {
-      console.log('[enrichActivitiesSequentially] activity failed, keeping original:', e.message);
-      results.push(activity);
-    }
-    await sleep(600);
-  }
-  return results;
+  return activity;
 }
 
 app.post('/api/generate', async (req, res) => {
@@ -203,10 +97,6 @@ app.post('/api/generate', async (req, res) => {
       budget_tier = 'Medium',
       total_budget = 'Flexible'
     } = req.body;
-
-    if (!location || !days) {
-      return res.status(400).json({ error: 'location and days are required' });
-    }
 
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
@@ -254,10 +144,10 @@ JSON SCHEMA:
 }`;
 
     const MODEL_CHAIN = [
-      'openai/gpt-oss-120b',
-      'qwen/qwen3.6-27b',
-      'openai/gpt-oss-20b'
-    ];
+  'openai/gpt-oss-120b',
+  'qwen/qwen3.6-27b',
+  'openai/gpt-oss-20b'
+];
 
     let tripData = null;
 
@@ -265,7 +155,7 @@ JSON SCHEMA:
       try {
         console.log(`[${modelName}] Trying...`);
 
-        const groqRes = await fetchWithTimeout(
+        const groqRes = await fetch(
           'https://api.groq.com/openai/v1/chat/completions',
           {
             method: 'POST',
@@ -290,19 +180,18 @@ JSON SCHEMA:
               max_completion_tokens: 5500,
               response_format: { type: 'json_object' }
             })
-          },
-          20000
+          }
         );
 
         console.log(`[${modelName}] Status: ${groqRes.status}`);
 
         if (groqRes.status === 429) continue;
 
-        if (!groqRes.ok) {
-          const errorText = await groqRes.text();
-          console.log(`[${modelName}] Error response:`, errorText);
-          continue;
-        }
+if (!groqRes.ok) {
+  const errorText = await groqRes.text();
+  console.log(`[${modelName}] Error response:`, errorText);
+  continue;
+}
 
         const result = await groqRes.json();
         const content = result.choices?.[0]?.message?.content;
@@ -317,14 +206,8 @@ JSON SCHEMA:
             .replace(/\n?```\s*$/, '');
         }
 
-        const parsed = JSON.parse(cleanContent);
+        tripData = JSON.parse(cleanContent);
 
-        if (!parsed || !Array.isArray(parsed.itinerary) || parsed.itinerary.length === 0) {
-          console.log(`[${modelName}] Parsed JSON but itinerary shape was invalid, skipping`);
-          continue;
-        }
-
-        tripData = parsed;
         console.log(`[${modelName}] Success!`);
         break;
       } catch (ex) {
@@ -337,38 +220,23 @@ JSON SCHEMA:
       return res.status(500).json({ error: 'Service busy. Try again.' });
     }
 
-    const destinationCenter = await geocodeDestinationCenter(location);
+    const enrichPromises = [];
 
     for (const day of tripData.itinerary) {
-      if (!Array.isArray(day.activities)) {
-        day.activities = [];
-        continue;
+      for (const activity of day.activities) {
+        enrichPromises.push(
+          fetchActivityDetails(activity, location)
+        );
       }
-      day.activities = await enrichActivitiesSequentially(
-        day.activities,
-        location,
-        destinationCenter
-      );
     }
+
+    await Promise.allSettled(enrichPromises);
 
     res.json(tripData);
   } catch (e) {
     console.error('Generate error:', e);
     res.status(500).json({ error: e.message });
   }
-});
-
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  if (res.headersSent) return next(err);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled rejection:', reason);
-});
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err);
 });
 
 if (require.main === module) {
