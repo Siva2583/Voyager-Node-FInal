@@ -15,6 +15,14 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/debug-env', (req, res) => {
+  res.json({
+    hasGroqKey: Boolean(process.env.GROQ_API_KEY),
+    hasLocationIqKey: Boolean(process.env.LOCATIONIQ_KEY),
+    hasPexelsKey: Boolean(process.env.PEXELS_API_KEY)
+  });
+});
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
