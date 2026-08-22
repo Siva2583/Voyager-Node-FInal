@@ -15,13 +15,41 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function haversineDistanceKm([lat1, lon1], [lat2, lon2]) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 async function fetchWikipediaImage(placeName) {
   try {
     const cleanQuery = placeName.split('(')[0].trim();
     const url = `https://en.wikipedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch=${encodeURIComponent(cleanQuery)}&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=800`;
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: { 'User-Agent': 'VoyagerAI/1.0' }
     });
+
+    if (!response.ok) return null;
+
     const data = await response.json();
     const pages = data?.query?.pages;
 
@@ -32,32 +60,82 @@ async function fetchWikipediaImage(placeName) {
         }
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.log('[fetchWikipediaImage] failed:', e.message);
+  }
 
   return null;
 }
 
-async function geocodePlace(placeName, locationContext) {
+async function geocodeDestinationCenter(locationContext) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationContext)}&limit=1`;
+    const response = await fetchWithTimeout(url, {
+      headers: { 'User-Agent': 'VoyagerAI/1.0' }
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data && data.length > 0) {
+      return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+    }
+  } catch (e) {
+    console.log('[geocodeDestinationCenter] failed:', e.message);
+  }
+  return null;
+}
+
+function buildViewbox([lat, lon], spanKm = 40) {
+  const latSpan = spanKm / 111;
+  const lonSpan = spanKm / (111 * Math.cos((lat * Math.PI) / 180) || 1);
+  const lonMin = lon - lonSpan;
+  const lonMax = lon + lonSpan;
+  const latMin = lat - latSpan;
+  const latMax = lat + latSpan;
+  return `${lonMin},${latMax},${lonMax},${latMin}`;
+}
+
+async function geocodePlace(placeName, locationContext, destinationCenter) {
   try {
     const cleanQuery = placeName.split('(')[0].trim();
     const query = `${cleanQuery}, ${locationContext}`;
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
 
-    const response = await fetch(url, {
+    let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+
+    if (destinationCenter) {
+      const viewbox = buildViewbox(destinationCenter);
+      url += `&viewbox=${viewbox}&bounded=1`;
+    }
+
+    const response = await fetchWithTimeout(url, {
       headers: { 'User-Agent': 'VoyagerAI/1.0' }
     });
+
+    if (!response.ok) return null;
 
     const data = await response.json();
 
     if (data && data.length > 0) {
-      return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-    }
-  } catch (e) {}
+      const coords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
 
-  return [0.0, 0.0];
+      if (destinationCenter) {
+        const distanceKm = haversineDistanceKm(coords, destinationCenter);
+        if (distanceKm > 100) {
+          return null;
+        }
+      }
+
+      return coords;
+    }
+  } catch (e) {
+    console.log('[geocodePlace] failed for', placeName, ':', e.message);
+  }
+
+  return null;
 }
 
-async function fetchActivityDetails(activity, locationContext) {
+async function fetchActivityDetails(activity, locationContext, destinationCenter) {
   const placeName = activity.place;
 
   if (!placeName) return activity;
@@ -73,19 +151,32 @@ async function fetchActivityDetails(activity, locationContext) {
 
   const coords = activity.coords;
 
-const validCoords =
-  Array.isArray(coords) &&
-  coords.length === 2 &&
-  coords.every(
-    n => typeof n === 'number' && Number.isFinite(n)
-  ) &&
-  !(coords[0] === 0 && coords[1] === 0);
+  const validCoords =
+    Array.isArray(coords) &&
+    coords.length === 2 &&
+    coords.every((n) => typeof n === 'number' && Number.isFinite(n)) &&
+    !(coords[0] === 0 && coords[1] === 0);
 
-if (!validCoords) {
-  activity.coords = await geocodePlace(placeName, locationContext);
-}
+  if (!validCoords) {
+    const geocoded = await geocodePlace(placeName, locationContext, destinationCenter);
+    activity.coords = geocoded || destinationCenter || null;
+  }
 
   return activity;
+}
+
+async function enrichActivitiesSequentially(activities, locationContext, destinationCenter) {
+  const results = [];
+  for (const activity of activities) {
+    try {
+      results.push(await fetchActivityDetails(activity, locationContext, destinationCenter));
+    } catch (e) {
+      console.log('[enrichActivitiesSequentially] activity failed, keeping original:', e.message);
+      results.push(activity);
+    }
+    await sleep(1100);
+  }
+  return results;
 }
 
 app.post('/api/generate', async (req, res) => {
@@ -97,6 +188,10 @@ app.post('/api/generate', async (req, res) => {
       budget_tier = 'Medium',
       total_budget = 'Flexible'
     } = req.body;
+
+    if (!location || !days) {
+      return res.status(400).json({ error: 'location and days are required' });
+    }
 
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
@@ -144,10 +239,10 @@ JSON SCHEMA:
 }`;
 
     const MODEL_CHAIN = [
-  'openai/gpt-oss-120b',
-  'qwen/qwen3.6-27b',
-  'openai/gpt-oss-20b'
-];
+      'openai/gpt-oss-120b',
+      'qwen/qwen3.6-27b',
+      'openai/gpt-oss-20b'
+    ];
 
     let tripData = null;
 
@@ -155,7 +250,7 @@ JSON SCHEMA:
       try {
         console.log(`[${modelName}] Trying...`);
 
-        const groqRes = await fetch(
+        const groqRes = await fetchWithTimeout(
           'https://api.groq.com/openai/v1/chat/completions',
           {
             method: 'POST',
@@ -180,18 +275,19 @@ JSON SCHEMA:
               max_completion_tokens: 5500,
               response_format: { type: 'json_object' }
             })
-          }
+          },
+          20000
         );
 
         console.log(`[${modelName}] Status: ${groqRes.status}`);
 
         if (groqRes.status === 429) continue;
 
-if (!groqRes.ok) {
-  const errorText = await groqRes.text();
-  console.log(`[${modelName}] Error response:`, errorText);
-  continue;
-}
+        if (!groqRes.ok) {
+          const errorText = await groqRes.text();
+          console.log(`[${modelName}] Error response:`, errorText);
+          continue;
+        }
 
         const result = await groqRes.json();
         const content = result.choices?.[0]?.message?.content;
@@ -206,8 +302,14 @@ if (!groqRes.ok) {
             .replace(/\n?```\s*$/, '');
         }
 
-        tripData = JSON.parse(cleanContent);
+        const parsed = JSON.parse(cleanContent);
 
+        if (!parsed || !Array.isArray(parsed.itinerary) || parsed.itinerary.length === 0) {
+          console.log(`[${modelName}] Parsed JSON but itinerary shape was invalid, skipping`);
+          continue;
+        }
+
+        tripData = parsed;
         console.log(`[${modelName}] Success!`);
         break;
       } catch (ex) {
@@ -220,23 +322,38 @@ if (!groqRes.ok) {
       return res.status(500).json({ error: 'Service busy. Try again.' });
     }
 
-    const enrichPromises = [];
+    const destinationCenter = await geocodeDestinationCenter(location);
 
     for (const day of tripData.itinerary) {
-      for (const activity of day.activities) {
-        enrichPromises.push(
-          fetchActivityDetails(activity, location)
-        );
+      if (!Array.isArray(day.activities)) {
+        day.activities = [];
+        continue;
       }
+      day.activities = await enrichActivitiesSequentially(
+        day.activities,
+        location,
+        destinationCenter
+      );
     }
-
-    await Promise.allSettled(enrichPromises);
 
     res.json(tripData);
   } catch (e) {
     console.error('Generate error:', e);
     res.status(500).json({ error: e.message });
   }
+});
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
 });
 
 if (require.main === module) {
