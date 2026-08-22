@@ -95,25 +95,31 @@ function buildViewbox([lat, lon], spanKm = 40) {
 
 const LOCATIONIQ_KEY = process.env.LOCATIONIQ_KEY;
 
+function pickMostImportant(results) {
+  if (!results || results.length === 0) return null;
+  return results.reduce((best, r) =>
+    parseFloat(r.importance || 0) > parseFloat(best.importance || 0) ? r : best
+  );
+}
+
 async function geocodeDestinationCenter(locationContext) {
   if (!LOCATIONIQ_KEY) return null;
   try {
-    const url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&city=${encodeURIComponent(locationContext)}&country=India&format=json&limit=1`;
+    const url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&city=${encodeURIComponent(locationContext)}&country=India&format=json&limit=5`;
     const response = await fetchWithTimeout(url);
 
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    if (data && data.length > 0) {
-      return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+    if (response.ok) {
+      const data = await response.json();
+      const best = pickMostImportant(data);
+      if (best) return [parseFloat(best.lat), parseFloat(best.lon)];
     }
 
-    const fallbackUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(locationContext)}&format=json&limit=1&countrycodes=in`;
+    const fallbackUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(locationContext)}&format=json&limit=5&countrycodes=in`;
     const fallbackResponse = await fetchWithTimeout(fallbackUrl);
-    if (!fallbackResponse.ok) return null;
-    const fallbackData = await fallbackResponse.json();
-    if (fallbackData && fallbackData.length > 0) {
-      return [parseFloat(fallbackData[0].lat), parseFloat(fallbackData[0].lon)];
+    if (fallbackResponse.ok) {
+      const fallbackData = await fallbackResponse.json();
+      const best = pickMostImportant(fallbackData);
+      if (best) return [parseFloat(best.lat), parseFloat(best.lon)];
     }
   } catch (e) {
     console.log('[geocodeDestinationCenter] failed:', e.message);
@@ -130,7 +136,7 @@ async function geocodePlace(placeName, locationContext, destinationCenter) {
     let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=in`;
 
     if (destinationCenter) {
-      const viewbox = buildViewbox(destinationCenter, 20);
+      const viewbox = buildViewbox(destinationCenter, 60);
       url += `&viewbox=${viewbox}&bounded=1`;
     }
 
@@ -148,7 +154,7 @@ async function geocodePlace(placeName, locationContext, destinationCenter) {
 
       if (destinationCenter) {
         const distanceKm = haversineDistanceKm(coords, destinationCenter);
-        if (distanceKm > 20) {
+        if (distanceKm > 60) {
           return null;
         }
       }
