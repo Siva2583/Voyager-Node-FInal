@@ -40,39 +40,23 @@ function haversineDistanceKm([lat1, lon1], [lat2, lon2]) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-async function fetchWikipediaImage(placeName) {
-  try {
-    const cleanQuery = placeName.split('(')[0].trim();
-    const url = `https://en.wikipedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch=${encodeURIComponent(cleanQuery)}&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=800`;
-    const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'VoyagerAI/1.0' }
-    });
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const pages = data?.query?.pages;
-
-    if (pages) {
-      for (const key of Object.keys(pages)) {
-        if (pages[key]?.thumbnail?.source) {
-          return pages[key].thumbnail.source;
-        }
-      }
-    }
-  } catch (e) {
-    console.log('[fetchWikipediaImage] failed:', e.message);
-  }
-
-  return null;
+function buildViewbox([lat, lon], spanKm = 40) {
+  const latSpan = spanKm / 111;
+  const lonSpan = spanKm / (111 * Math.cos((lat * Math.PI) / 180) || 1);
+  const lonMin = lon - lonSpan;
+  const lonMax = lon + lonSpan;
+  const latMin = lat - latSpan;
+  const latMax = lat + latSpan;
+  return `${lonMin},${latMax},${lonMax},${latMin}`;
 }
 
+const LOCATIONIQ_KEY = process.env.LOCATIONIQ_KEY;
+
 async function geocodeDestinationCenter(locationContext) {
+  if (!LOCATIONIQ_KEY) return null;
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationContext)}&limit=1`;
-    const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'VoyagerAI/1.0' }
-    });
+    const url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(locationContext)}&format=json&limit=1`;
+    const response = await fetchWithTimeout(url);
 
     if (!response.ok) return null;
 
@@ -86,35 +70,27 @@ async function geocodeDestinationCenter(locationContext) {
   return null;
 }
 
-function buildViewbox([lat, lon], spanKm = 40) {
-  const latSpan = spanKm / 111;
-  const lonSpan = spanKm / (111 * Math.cos((lat * Math.PI) / 180) || 1);
-  const lonMin = lon - lonSpan;
-  const lonMax = lon + lonSpan;
-  const latMin = lat - latSpan;
-  const latMax = lat + latSpan;
-  return `${lonMin},${latMax},${lonMax},${latMin}`;
-}
-
 async function geocodePlace(placeName, locationContext, destinationCenter) {
+  if (!LOCATIONIQ_KEY) return null;
   try {
     const cleanQuery = placeName.split('(')[0].trim();
     const query = `${cleanQuery}, ${locationContext}`;
 
-    let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+    let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1`;
 
     if (destinationCenter) {
       const viewbox = buildViewbox(destinationCenter);
       url += `&viewbox=${viewbox}&bounded=1`;
     }
 
-    const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'VoyagerAI/1.0' }
-    });
+    let response = await fetchWithTimeout(url);
+    let data = response.ok ? await response.json() : null;
 
-    if (!response.ok) return null;
-
-    const data = await response.json();
+    if ((!data || data.length === 0) && destinationCenter) {
+      const unboundedUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1`;
+      response = await fetchWithTimeout(unboundedUrl);
+      data = response.ok ? await response.json() : null;
+    }
 
     if (data && data.length > 0) {
       const coords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
@@ -135,19 +111,58 @@ async function geocodePlace(placeName, locationContext, destinationCenter) {
   return null;
 }
 
+const PEXELS_KEY = process.env.PEXELS_API_KEY;
+
+const CATEGORY_KEYWORDS = [
+  { match: /hotel|resort|stay|inn|lodge/i, query: 'hotel room interior' },
+  { match: /restaurant|cafe|dhaba|biryani|kitchen|eatery/i, query: 'indian restaurant food' },
+  { match: /temple|mandir|shrine/i, query: 'hindu temple architecture' },
+  { match: /fort|palace|mahal/i, query: 'indian palace architecture' },
+  { match: /beach|coast/i, query: 'india beach coastline' },
+  { match: /museum|gallery/i, query: 'museum interior exhibit' },
+  { match: /market|bazaar/i, query: 'indian street market' },
+  { match: /park|garden/i, query: 'india public garden' }
+];
+
+function guessCategoryQuery(placeName, desc) {
+  const haystack = `${placeName} ${desc || ''}`;
+  for (const entry of CATEGORY_KEYWORDS) {
+    if (entry.match.test(haystack)) return entry.query;
+  }
+  return 'india travel destination';
+}
+
+async function fetchPexelsImage(query) {
+  if (!PEXELS_KEY) return null;
+  try {
+    const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1&orientation=landscape`;
+    const response = await fetchWithTimeout(url, {
+      headers: { Authorization: PEXELS_KEY }
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const photo = data?.photos?.[0];
+    return photo?.src?.large || photo?.src?.medium || null;
+  } catch (e) {
+    console.log('[fetchPexelsImage] failed for', query, ':', e.message);
+  }
+  return null;
+}
+
+async function fetchActivityImage(activity) {
+  const categoryQuery = guessCategoryQuery(activity.place, activity.desc);
+  const image = await fetchPexelsImage(categoryQuery);
+  return image || 'https://images.pexels.com/photos/1051073/pexels-photo-1051073.jpeg';
+}
+
 async function fetchActivityDetails(activity, locationContext, destinationCenter) {
   const placeName = activity.place;
 
   if (!placeName) return activity;
 
-  let imageUrl = await fetchWikipediaImage(placeName);
-
-  if (!imageUrl) {
-    const cleanQuery = placeName.split('(')[0].trim();
-    imageUrl = `https://loremflickr.com/800/600/${cleanQuery.replace(/ /g, ',')},travel/all`;
-  }
-
-  activity.image = imageUrl;
+  activity.image = await fetchActivityImage(activity);
 
   const coords = activity.coords;
 
@@ -174,7 +189,7 @@ async function enrichActivitiesSequentially(activities, locationContext, destina
       console.log('[enrichActivitiesSequentially] activity failed, keeping original:', e.message);
       results.push(activity);
     }
-    await sleep(1100);
+    await sleep(600);
   }
   return results;
 }
