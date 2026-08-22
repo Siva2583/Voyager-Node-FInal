@@ -29,21 +29,19 @@ app.get('/api/debug-geocode', async (req, res) => {
   const result = { place, locationContext };
 
   try {
-    const centerUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&city=${encodeURIComponent(locationContext)}&country=India&format=json&limit=1`;
-    const centerRes = await fetchWithTimeout(centerUrl);
-    result.centerStatus = centerRes.status;
-    result.centerBody = await centerRes.text();
+    result.destinationCenter = await geocodeDestinationCenter(locationContext);
   } catch (e) {
     result.centerError = e.message;
   }
 
   try {
-    const placeUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(place + ', ' + locationContext)}&format=json&limit=1&countrycodes=in`;
-    const placeRes = await fetchWithTimeout(placeUrl);
-    result.placeStatus = placeRes.status;
-    result.placeBody = await placeRes.text();
+    result.placeCoords = await geocodePlace(place, locationContext, result.destinationCenter);
   } catch (e) {
     result.placeError = e.message;
+  }
+
+  if (result.destinationCenter && result.placeCoords) {
+    result.distanceKm = haversineDistanceKm(result.placeCoords, result.destinationCenter);
   }
 
   try {
