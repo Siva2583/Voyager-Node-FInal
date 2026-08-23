@@ -169,7 +169,7 @@ async function geocodePlace(placeName, areaName, locationContext, destinationCen
     for (const attempt of attempts) {
       let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(attempt.query)}&format=json&limit=1&countrycodes=in`;
       if (attempt.bounded && destinationCenter) {
-        const viewbox = buildViewbox(destinationCenter, 60);
+        const viewbox = buildViewbox(destinationCenter, 150);
         url += `&viewbox=${viewbox}&bounded=1`;
       }
 
@@ -178,7 +178,7 @@ async function geocodePlace(placeName, areaName, locationContext, destinationCen
 
       if (destinationCenter) {
         const distanceKm = haversineDistanceKm(coords, destinationCenter);
-        if (distanceKm > 60) continue;
+        if (distanceKm > 150) continue;
       }
 
       return coords;
