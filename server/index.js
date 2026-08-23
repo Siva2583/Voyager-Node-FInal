@@ -243,16 +243,6 @@ async function prefetchCategoryImages(allActivities) {
 }
 
 async function geocodeActivity(activity, locationContext, destinationCenter) {
-  const coords = activity.coords;
-
-  const validCoords =
-    Array.isArray(coords) &&
-    coords.length === 2 &&
-    coords.every((n) => typeof n === 'number' && Number.isFinite(n)) &&
-    !(coords[0] === 0 && coords[1] === 0);
-
-  if (validCoords) return activity;
-
   const queryPlace = activity.area ? `${activity.place}, ${activity.area}` : activity.place;
   const geocoded = await geocodePlace(queryPlace, locationContext, destinationCenter);
   activity.coords = geocoded || destinationCenter || null;
