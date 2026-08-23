@@ -25,8 +25,10 @@ app.get('/api/debug-env', (req, res) => {
 
 app.get('/api/debug-geocode', async (req, res) => {
   const place = req.query.place || 'Baga Beach';
+  const area = req.query.area || '';
   const locationContext = req.query.location || 'Goa';
-  const result = { place, locationContext };
+  const queryPlace = area ? `${place}, ${area}` : place;
+  const result = { place, area, queryPlace, locationContext };
 
   try {
     result.destinationCenter = await geocodeDestinationCenter(locationContext);
@@ -35,22 +37,13 @@ app.get('/api/debug-geocode', async (req, res) => {
   }
 
   try {
-    result.placeCoords = await geocodePlace(place, locationContext, result.destinationCenter);
+    result.placeCoords = await geocodePlace(queryPlace, locationContext, result.destinationCenter);
   } catch (e) {
     result.placeError = e.message;
   }
 
   if (result.destinationCenter && result.placeCoords) {
     result.distanceKm = haversineDistanceKm(result.placeCoords, result.destinationCenter);
-  }
-
-  try {
-    const pexelsUrl = `https://api.pexels.com/v1/search?query=${encodeURIComponent('india travel landmark scenery')}&per_page=1`;
-    const pexelsRes = await fetchWithTimeout(pexelsUrl, { headers: { Authorization: PEXELS_KEY } });
-    result.pexelsStatus = pexelsRes.status;
-    result.pexelsBody = await pexelsRes.text();
-  } catch (e) {
-    result.pexelsError = e.message;
   }
 
   res.json(result);
