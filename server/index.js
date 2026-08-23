@@ -27,8 +27,7 @@ app.get('/api/debug-geocode', async (req, res) => {
   const place = req.query.place || 'Baga Beach';
   const area = req.query.area || '';
   const locationContext = req.query.location || 'Goa';
-  const queryPlace = area ? `${place}, ${area}` : place;
-  const result = { place, area, queryPlace, locationContext };
+  const result = { place, area, locationContext };
 
   try {
     result.destinationCenter = await geocodeDestinationCenter(locationContext);
@@ -37,7 +36,7 @@ app.get('/api/debug-geocode', async (req, res) => {
   }
 
   try {
-    result.placeCoords = await geocodePlace(queryPlace, locationContext, result.destinationCenter);
+    result.placeCoords = await geocodePlace(place, area, locationContext, result.destinationCenter);
   } catch (e) {
     result.placeError = e.message;
   }
@@ -148,31 +147,39 @@ async function tryGeocodeUrl(url, placeName) {
   return [parseFloat(top.lat), parseFloat(top.lon)];
 }
 
-async function geocodePlace(placeName, locationContext, destinationCenter) {
+async function geocodePlace(placeName, areaName, locationContext, destinationCenter) {
   if (!LOCATIONIQ_KEY) return null;
   try {
     const cleanQuery = placeName.split('(')[0].trim();
-    const query = `${cleanQuery}, ${locationContext}`;
+    const attempts = [];
 
-    let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=in`;
-    if (destinationCenter) {
-      const viewbox = buildViewbox(destinationCenter, 60);
-      url += `&viewbox=${viewbox}&bounded=1`;
+    if (areaName) {
+      attempts.push(`${cleanQuery}, ${areaName}, ${locationContext}`);
     }
+    attempts.push(`${cleanQuery}, ${locationContext}`);
 
-    let coords = await tryGeocodeUrl(url, cleanQuery);
+    for (const query of attempts) {
+      let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=in`;
+      if (destinationCenter) {
+        const viewbox = buildViewbox(destinationCenter, 60);
+        url += `&viewbox=${viewbox}&bounded=1`;
+      }
 
-    if (!coords && destinationCenter) {
-      const unboundedUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1`;
-      coords = await tryGeocodeUrl(unboundedUrl, cleanQuery);
+      let coords = await tryGeocodeUrl(url, cleanQuery);
+
+      if (!coords && destinationCenter) {
+        const unboundedUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1`;
+        coords = await tryGeocodeUrl(unboundedUrl, cleanQuery);
+      }
+
+      if (coords) {
+        if (destinationCenter) {
+          const distanceKm = haversineDistanceKm(coords, destinationCenter);
+          if (distanceKm > 60) continue;
+        }
+        return coords;
+      }
     }
-
-    if (coords && destinationCenter) {
-      const distanceKm = haversineDistanceKm(coords, destinationCenter);
-      if (distanceKm > 60) return null;
-    }
-
-    return coords;
   } catch (e) {
     console.log('[geocodePlace] failed for', placeName, ':', e.message);
   }
@@ -243,8 +250,7 @@ async function prefetchCategoryImages(allActivities) {
 }
 
 async function geocodeActivity(activity, locationContext, destinationCenter) {
-  const queryPlace = activity.area ? `${activity.place}, ${activity.area}` : activity.place;
-  const geocoded = await geocodePlace(queryPlace, locationContext, destinationCenter);
+  const geocoded = await geocodePlace(activity.place, activity.area, locationContext, destinationCenter);
   activity.coords = geocoded || destinationCenter || null;
   return activity;
 }
