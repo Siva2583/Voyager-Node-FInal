@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://readme-typing-svg.herokuapp.com?font=Poppins&weight=800&size=45&pause=1000&color=38BDF8&center=true&vCenter=true&width=500&height=70&lines=🌍+VOYAGER+v2.0" alt="Voyager" />
+<img src="https://readme-typing-svg.herokuapp.com?font=Poppins&weight=800&size=45&pause=1000&color=38BDF8&center=true&vCenter=true&width=500&height=70&lines=🌍+VOYAGER+v2.1" alt="Voyager" />
 
 ### ⚡ AI-Powered Travel Planner
 
@@ -12,7 +12,7 @@
 
 <br />
 
-`React 18` · `Vite` · `Node.js` · `Express` · `Groq AI` · `LLaMA 3.3 70B` · `Leaflet.js` · `Tailwind CSS v4`
+`React 18` · `Vite` · `Node.js` · `Express` · `Groq AI` · `LocationIQ` · `Pexels` · `Leaflet.js` · `Tailwind CSS v4`
 
 <br />
 
@@ -30,14 +30,14 @@
 
 ## 📖 About
 
-Voyager is a **full-stack AI application** that generates personalized, day-by-day travel itineraries. Unlike generic AI wrappers, Voyager combines **intelligent model orchestration** with **real-world data enrichment** to produce trip plans that are:
+Voyager is a **full-stack AI application** that generates personalized, day-by-day travel itineraries. Unlike generic AI wrappers, Voyager combines **intelligent model orchestration** with **real-world data verification** to produce trip plans that are:
 
-- 📍 **Geographically accurate** — every activity is geocoded via OpenStreetMap & plotted on an interactive map  
-- 💰 **Financially realistic** — costs are per-person × group size, no LLM math hallucinations  
-- 🖼️ **Visually enriched** — Wikipedia images fetched for every location automatically  
-- ⚡ **Blazing fast** — Groq's custom LPU chips deliver **~1-3 second** AI inference  
+- 📍 **Geographically accurate** — every activity is independently geocoded and cross-checked; the LLM's own guessed coordinates are never trusted
+- 💰 **Financially realistic** — costs are per-person × group size, no LLM math hallucinations
+- 🖼️ **Visually enriched** — real category-matched photos (hotel/restaurant/temple/etc.) fetched via Pexels for every activity
+- ⚡ **Blazing fast** — Groq's custom LPU chips deliver **~1-3 second** AI inference, with rate-limit-safe concurrent enrichment on top
 
-> **v2.0** — Complete rewrite from Python/Flask + Gemini → **Node.js/Express + Groq LLaMA 3.3 70B**
+> **v2.1** — Replaced Nominatim/Wikipedia enrichment with a verified LocationIQ + Pexels pipeline, after discovering (through real production debugging) that free geocoders can silently return wrong-but-plausible matches. See [Engineering Deep Dive](#-engineering-deep-dive) for how that was found and fixed.
 
 <br />
 
@@ -52,25 +52,25 @@ Voyager is a **full-stack AI application** that generates personalized, day-by-d
 <td width="50%">
 
 ### 🧠 Multi-Model Fallback Chain
-Cascades through **LLaMA 3.3 70B → LLaMA 3.1 8B → Mixtral 8x7B** automatically. Rate-limited? The next model picks up — zero downtime.
+Cascades through Groq-hosted models automatically. Rate-limited or malformed output? The next model in the chain picks up — zero downtime.
 
-### 💸 Strict Budget Enforcement
-Every cost is calculated **per-person × group size**. Custom algorithm prevents the AI from producing unrealistic budgets.
+### 📍 Verified Geocoding, Not Guessed
+Every activity is geocoded via **LocationIQ**, cross-checked against the returned address text, and sanity-checked for distance — the LLM's own invented coordinates are always discarded and replaced with a real lookup.
 
 ### 🗺️ Interactive Leaflet Maps
-Activities geocoded via OpenStreetMap Nominatim. Click a card → map **flies** to that location with smooth animation.
+Rendered on CartoDB's free production tile service. Click a card → map **flies** to that location with smooth animation.
 
 </td>
 <td width="50%">
 
-### ⚡ Concurrent Data Enrichment
-`Promise.allSettled()` fires all Wikipedia image + geocoding requests **in parallel** — ~60% faster than sequential.
+### ⚡ Rate-Limit-Safe Enrichment
+All geocoding calls pass through a shared global rate limiter, so batched/concurrent requests never exceed the free-tier API limits — no silent failures, no rate-limit cascades.
+
+### 🖼️ Category-Matched Images
+Images are fetched **once per category** (hotel, restaurant, temple, market, etc.) via Pexels and reused across matching activities — real, relevant photos instead of random stock images.
 
 ### 🔄 Smart Replan Engine
 Reshuffle any day by **Time, Budget, or Energy** constraints. Client-side optimizer — **no extra API call** needed.
-
-### 📄 One-Click PDF Export
-Print-ready itinerary with all details, costs, and local insider tips — ready to share or take offline.
 
 </td>
 </tr>
@@ -129,10 +129,9 @@ dotenv
 <td>
 
 Groq Cloud API<br/>
-LLaMA 3.3 70B<br/>
-Mixtral 8x7B<br/>
-Wikipedia API<br/>
-OpenStreetMap
+LocationIQ (geocoding)<br/>
+Pexels API (images)<br/>
+CartoDB (map tiles)
 
 </td>
 <td>
@@ -172,7 +171,7 @@ Voyager-Node-FInal/
 │   └── package.json
 │
 ├── server/                        # 🟢 Node.js + Express Backend
-│   ├── index.js                   # API routes + AI chain + enrichment
+│   ├── index.js                   # API routes + AI chain + geocoding/image enrichment
 │   ├── vercel.json                # Vercel serverless config
 │   └── package.json
 │
@@ -197,6 +196,8 @@ Voyager-Node-FInal/
 | 🟢 Node.js | v18 or higher |
 | 📦 npm | v9 or higher |
 | 🔑 Groq API Key | Free at [console.groq.com](https://console.groq.com) |
+| 🔑 LocationIQ API Key | Free at [locationiq.com](https://locationiq.com) (5,000 req/day free tier) |
+| 🔑 Pexels API Key | Free at [pexels.com/api](https://www.pexels.com/api) |
 
 ### 1️⃣ Clone
 
@@ -215,6 +216,8 @@ npm install
 Create `server/.env`:
 ```env
 GROQ_API_KEY=your_groq_api_key_here
+LOCATIONIQ_KEY=your_locationiq_api_key_here
+PEXELS_API_KEY=your_pexels_api_key_here
 PORT=3001
 ```
 
@@ -242,6 +245,8 @@ npm run dev
 
 Navigate to **`http://localhost:5173`** and start planning! 🎉
 
+> ⚠️ **Deploying to Vercel?** Environment variables set locally in `.env` do **not** carry over automatically — add `GROQ_API_KEY`, `LOCATIONIQ_KEY`, and `PEXELS_API_KEY` separately in the Vercel Dashboard under Project → Settings → Environment Variables, then redeploy.
+
 <br />
 
 ---
@@ -253,6 +258,8 @@ Navigate to **`http://localhost:5173`** and start planning! 🎉
 | Variable | File | Description |
 |----------|------|-------------|
 | `GROQ_API_KEY` | `server/.env` | Groq Cloud API key ([get one free](https://console.groq.com)) |
+| `LOCATIONIQ_KEY` | `server/.env` | LocationIQ geocoding key ([get one free](https://locationiq.com)) |
+| `PEXELS_API_KEY` | `server/.env` | Pexels image search key ([get one free](https://www.pexels.com/api)) |
 | `PORT` | `server/.env` | Backend port (default: `3000`) |
 | `VITE_API_URL` | `client/.env` | Backend URL for API requests |
 
@@ -306,19 +313,23 @@ Navigate to **`http://localhost:5173`** and start planning! 🎉
           "id": "goa_d1_a1",
           "time": "08:00 AM",
           "place": "Baga Beach",
+          "area": "Baga, North Goa",
+          "category": "sightseeing",
           "desc": "Pro-tip: Visit before 9 AM to avoid crowds.",
           "cost": 0,
           "duration": 90,
           "priority": "high",
           "energy": "low",
-          "coords": [15.5553, 73.7514],
-          "image": "https://upload.wikimedia.org/..."
+          "coords": [15.5573721, 73.7509800],
+          "image": "https://images.pexels.com/photos/..."
         }
       ]
     }
   ]
 }
 ```
+
+`area` and `category` are generated by the LLM and used server-side to improve geocoding precision and image relevance — they're kept in the response for transparency but the `coords` and `image` fields are always independently verified, never taken from the LLM directly.
 
 <br />
 
@@ -328,101 +339,95 @@ Navigate to **`http://localhost:5173`** and start planning! 🎉
 
 ## 🧠 Engineering Deep Dive
 
-### 1. Multi-Model Fallback Chain
+This section covers the real production issues found and fixed, not just the intended design — the debugging process here is arguably the most interview-relevant part of the project.
+
+### 1. Never trust the LLM's own coordinates
+
+**❌ Problem:** Early versions asked the LLM to also output `coords` for each activity as a placeholder. It turns out the model happily fabricates plausible-looking coordinates (a hotel, a fort, and a restaurant all within ~100m of each other) — and because they weren't exactly `[0,0]`, the code treated them as "already valid" and **skipped geocoding entirely**.
+
+**✅ Solution:** Coordinates from the LLM are never trusted. Every activity is independently geocoded, every time — the model's own numbers are discarded.
+
+```javascript
+async function geocodeActivity(activity, locationContext, destinationCenter) {
+  // LLM-provided coords are ignored on purpose — always verify for real
+  const geocoded = await geocodePlace(activity.place, activity.area, locationContext, destinationCenter);
+  activity.coords = geocoded || destinationCenter || null;
+  return activity;
+}
+```
+
+---
+
+### 2. Word-overlap validation against fuzzy geocoding matches
+
+**❌ Problem:** Free geocoders do fuzzy text matching, not exact lookups. Searching "Shree Mangueshi Temple" once returned a real place 23km away in the wrong direction — confidently, with no error, just the wrong answer.
+
+**✅ Solution:** Every geocode result's returned address text (`display_name`) is checked for actual word overlap with the place name being searched. Zero overlap → the match is rejected as low-confidence and falls back to an honest city-center pin instead of a confidently wrong one.
+
+```javascript
+function nameOverlapsResult(placeName, displayName) {
+  const placeWords = normalizeWords(placeName);
+  const resultWords = new Set(normalizeWords(displayName));
+  return placeWords.some((w) => resultWords.has(w));
+}
+```
+
+---
+
+### 3. Destination-center resolution had to be structured, not free-text
+
+**❌ Problem:** A trip to "Goa" once resolved its reference point to a random hamlet also named "Goa" — in Himachal Pradesh, 1,500km away. A trip to "Kurnool" resolved to the *district* boundary centroid instead of the city itself.
+
+**✅ Solution:** Structured `city=` queries instead of free text, plus picking the highest-`importance` result among several candidates instead of blindly trusting the first one returned.
+
+```javascript
+function pickMostImportant(results) {
+  return results.reduce((best, r) =>
+    parseFloat(r.importance || 0) > parseFloat(best.importance || 0) ? r : best
+  );
+}
+```
+
+---
+
+### 4. A global rate limiter, because retries can silently reintroduce the exact bug they're fixing
+
+**❌ Problem:** Adding a smarter retry strategy (try with area, then without) meant each activity could fire up to 4 geocoding requests. With activities processed in small concurrent batches, that briefly burst past LocationIQ's free-tier rate limit — and nearly everything started silently falling back to the city center again, undoing earlier fixes without any code being "wrong" in isolation.
+
+**✅ Solution:** One shared queue that every LocationIQ call passes through, regardless of retries or batch concurrency, spacing real network calls at a safe fixed interval:
+
+```javascript
+let locationIqQueue = Promise.resolve();
+function withLocationIqRateLimit(fn) {
+  const run = locationIqQueue.then(() => fn());
+  locationIqQueue = run.catch(() => {}).then(() => sleep(550));
+  return run;
+}
+```
+
+---
+
+### 5. Multi-Model Fallback Chain
 
 **❌ Problem:** Single model fails when rate-limited → entire app goes down.
 
-**✅ Solution:** Auto-cascading through 3 models:
-
-```javascript
-const MODEL_CHAIN = [
-  'llama-3.3-70b-versatile',    // Primary — best quality
-  'llama-3.1-8b-instant',       // Fallback — fast & light
-  'mixtral-8x7b-32768'          // Last resort — reliable
-];
-
-for (const modelName of MODEL_CHAIN) {
-  const res = await fetch(GROQ_URL, { body: JSON.stringify({ model: modelName, ... }) });
-  if (res.status === 429) continue;   // Rate-limited → try next
-  if (!res.ok) continue;              // Error → try next
-  tripData = JSON.parse(result);
-  break;                              // ✅ Success!
-}
-```
+**✅ Solution:** Auto-cascading through a chain of Groq-hosted models — if one is rate-limited or errors, the next picks up automatically, with no downtime.
 
 ---
 
-### 2. Parallel Data Enrichment
+### 6. LLM Output Safety (JSON parsing)
 
-**❌ Problem:** Sequential Wikipedia + geocoding = **8-12 second** wait.
+**❌ Problem:** LLMs can return markdown fences, conversational preambles, or malformed JSON.
 
-**✅ Solution:** `Promise.allSettled()` for **concurrent** enrichment (~60% faster):
-
-```javascript
-const enrichPromises = [];
-
-for (const day of tripData.itinerary) {
-  for (const activity of day.activities) {
-    enrichPromises.push(
-      fetchActivityDetails(activity, location)  // Wikipedia img + geocode
-    );
-  }
-}
-
-await Promise.allSettled(enrichPromises);  // 🚀 All fire at once
-```
+**✅ Solution:** Layered defense — an explicit system prompt instruction, Groq's native `json_object` response mode, server-side markdown-fence stripping, and a shape check (`Array.isArray(parsed.itinerary)`) before the result is ever trusted.
 
 ---
 
-### 3. LLM Hallucination Control
+### 7. Client-Side Smart Replanning
 
-**❌ Problem:** LLMs return markdown, conversational text, or broken JSON.
+**❌ Problem:** Re-calling the AI for every small tweak to a day's plan is slow and wastes API calls.
 
-**✅ Solution:** Triple-layer defense:
-
-```javascript
-// Layer 1: System prompt
-{ role: 'system', content: 'Respond with ONLY valid JSON. No markdown, no code fences.' }
-
-// Layer 2: Groq native JSON mode
-response_format: { type: 'json_object' }
-
-// Layer 3: Server-side regex cleanup (just in case)
-let clean = content.trim();
-if (clean.startsWith('```')) {
-  clean = clean.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-}
-tripData = JSON.parse(clean);  // ✅ Safe parse
-```
-
----
-
-### 4. Client-Side Smart Replanning
-
-**❌ Problem:** Re-calling AI for every tweak is slow & expensive.
-
-**✅ Solution:** Client-side optimizer using activity metadata — **zero API calls**:
-
-```javascript
-// Example: Replan by time constraint
-if (replanOption === 'time') {
-  let timeSpent = 0;
-  const TIME_LIMIT = 360; // 6 hours
-
-  // Keep high-priority activities first
-  dayActivities.sort((a, b) => priority[b.priority] - priority[a.priority]);
-  
-  dayActivities.forEach(activity => {
-    if (timeSpent + activity.duration <= TIME_LIMIT) {
-      activity.status = 'kept';
-      timeSpent += activity.duration;
-    } else {
-      activity.status = 'removed';
-      activity.reason = 'Not enough time';
-    }
-  });
-}
-```
+**✅ Solution:** A client-side optimizer that reshuffles activities by time, budget, or energy constraints using metadata already in the response — zero extra API calls.
 
 <br />
 
@@ -430,19 +435,32 @@ if (replanOption === 'time') {
 
 <br />
 
-## 📊 v1 → v2 Changelog
+## 🧭 Known Limitations
 
-| | v1 (Python) | v2 (Node.js) ✨ |
-|---|---|---|
-| **Backend** | Python + Flask + Gunicorn | Node.js + Express |
-| **AI Model** | Google Gemini Pro | Groq LLaMA 3.3 70B |
-| **Fallback** | ❌ Single model | ✅ 3-model auto-cascade |
-| **Concurrency** | `ThreadPoolExecutor` | `Promise.allSettled()` |
-| **JSON Safety** | System prompt only | Prompt + `json_object` + regex |
-| **Replanning** | ❌ Not available | ✅ Time / Budget / Energy |
-| **Inference** | ~5-8 seconds | **~1-3 seconds** (Groq LPU) |
-| **Deployment** | Vercel + Railway (2 services) | Vercel only (serverless) |
-| **Styling** | CSS3 inline | Tailwind CSS v4 |
+Being upfront about what's still imperfect, rather than hiding it:
+
+- **Small, generically-named local businesses** (a specific small restaurant or guest house) can occasionally still geocode to the wrong branch/town if a same-named place exists elsewhere in LocationIQ's data and the address text technically overlaps. Major landmarks, well-known hotels, and well-known restaurants are consistently accurate; small/obscure spots are the remaining soft edge.
+- This is a genuine free-tier data coverage ceiling, not a logic bug — the only stronger fix would be a paid API with real business listing data (e.g. Google Places), which isn't part of this project's budget.
+
+<br />
+
+---
+
+<br />
+
+## 📊 v1 → v2.1 Changelog
+
+| | v1 (Python) | v2.0 (Node.js) | v2.1 (Verified pipeline) ✨ |
+|---|---|---|---|
+| **Backend** | Python + Flask + Gunicorn | Node.js + Express | Node.js + Express |
+| **AI Model** | Google Gemini Pro | Groq (single model) | Groq multi-model fallback chain |
+| **Geocoding** | ❌ None | Nominatim (unverified) | **LocationIQ + word-overlap validation + rate limiting** |
+| **Images** | ❌ None | Wikipedia / random stock | **Pexels, category-matched, cached per category** |
+| **Coordinate trust** | — | Trusted LLM output | **LLM output always discarded, always re-verified** |
+| **Map tiles** | — | Raw OSM tile server (rate-limited in production) | **CartoDB production-safe tiles** |
+| **Concurrency safety** | ❌ | Unbounded parallel requests | **Global rate-limited queue** |
+| **Replanning** | ❌ Not available | ✅ Time / Budget / Energy | ✅ Time / Budget / Energy |
+| **Deployment** | Vercel + Railway (2 services) | Vercel only (serverless) | Vercel only (serverless) |
 
 <br />
 
@@ -454,10 +472,10 @@ if (replanOption === 'time') {
 
 The project is pre-configured for **Vercel**:
 
-1. Push code to GitHub  
-2. Import repo in [Vercel Dashboard](https://vercel.com/dashboard)  
-3. Add `GROQ_API_KEY` in Environment Variables  
-4. Deploy ✅  
+1. Push code to GitHub
+2. Import repo in [Vercel Dashboard](https://vercel.com/dashboard)
+3. Add `GROQ_API_KEY`, `LOCATIONIQ_KEY`, and `PEXELS_API_KEY` in Environment Variables (Production scope)
+4. Deploy ✅
 
 The root `package.json` handles everything:
 ```json
