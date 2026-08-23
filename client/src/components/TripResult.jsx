@@ -202,7 +202,10 @@ return (
         <div className="map-column-sticky">
           {validActivities.length > 0 ? (
             <MapContainer center={validActivities[0].coords} zoom={13} scrollWheelZoom={true} style={{ height: '100%', width: '100%', background:'#0f172a' }}>
-              <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <TileLayer
+  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+/>
               <MapController selectedCoords={selectedPlace?.coords} activities={validActivities} />
               {validActivities.map((act, idx) => (
                 <Marker 
