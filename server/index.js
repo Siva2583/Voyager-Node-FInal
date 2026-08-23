@@ -125,6 +125,36 @@ async function geocodeDestinationCenter(locationContext) {
   return null;
 }
 
+function normalizeWords(text) {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4);
+}
+
+function nameOverlapsResult(placeName, displayName) {
+  const placeWords = normalizeWords(placeName);
+  const resultWords = new Set(normalizeWords(displayName));
+  if (placeWords.length === 0) return true;
+  return placeWords.some((w) => resultWords.has(w));
+}
+
+async function tryGeocodeUrl(url, placeName) {
+  const response = await fetchWithTimeout(url);
+  if (!response.ok) return null;
+  const data = await response.json();
+  if (!data || data.length === 0) return null;
+
+  const top = data[0];
+  if (!nameOverlapsResult(placeName, top.display_name)) {
+    console.log('[geocodePlace] rejected low-confidence match:', placeName, '->', top.display_name);
+    return null;
+  }
+
+  return [parseFloat(top.lat), parseFloat(top.lon)];
+}
+
 async function geocodePlace(placeName, locationContext, destinationCenter) {
   if (!LOCATIONIQ_KEY) return null;
   try {
@@ -132,33 +162,24 @@ async function geocodePlace(placeName, locationContext, destinationCenter) {
     const query = `${cleanQuery}, ${locationContext}`;
 
     let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=in`;
-
     if (destinationCenter) {
       const viewbox = buildViewbox(destinationCenter, 60);
       url += `&viewbox=${viewbox}&bounded=1`;
     }
 
-    let response = await fetchWithTimeout(url);
-    let data = response.ok ? await response.json() : null;
+    let coords = await tryGeocodeUrl(url, cleanQuery);
 
-    if ((!data || data.length === 0) && destinationCenter) {
+    if (!coords && destinationCenter) {
       const unboundedUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1`;
-      response = await fetchWithTimeout(unboundedUrl);
-      data = response.ok ? await response.json() : null;
+      coords = await tryGeocodeUrl(unboundedUrl, cleanQuery);
     }
 
-    if (data && data.length > 0) {
-      const coords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-
-      if (destinationCenter) {
-        const distanceKm = haversineDistanceKm(coords, destinationCenter);
-        if (distanceKm > 60) {
-          return null;
-        }
-      }
-
-      return coords;
+    if (coords && destinationCenter) {
+      const distanceKm = haversineDistanceKm(coords, destinationCenter);
+      if (distanceKm > 60) return null;
     }
+
+    return coords;
   } catch (e) {
     console.log('[geocodePlace] failed for', placeName, ':', e.message);
   }
