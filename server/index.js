@@ -96,7 +96,7 @@ async function geocodeDestinationCenter(locationContext) {
   if (!LOCATIONIQ_KEY) return null;
   try {
     const url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&city=${encodeURIComponent(locationContext)}&country=India&format=json&limit=5`;
-    const response = await fetchWithTimeout(url);
+    const response = await withLocationIqRateLimit(() => fetchWithTimeout(url));
 
     if (response.ok) {
       const data = await response.json();
@@ -105,7 +105,7 @@ async function geocodeDestinationCenter(locationContext) {
     }
 
     const fallbackUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(locationContext)}&format=json&limit=5&countrycodes=in`;
-    const fallbackResponse = await fetchWithTimeout(fallbackUrl);
+    const fallbackResponse = await withLocationIqRateLimit(() => fetchWithTimeout(fallbackUrl));
     if (fallbackResponse.ok) {
       const fallbackData = await fallbackResponse.json();
       const best = pickMostImportant(fallbackData);
@@ -132,8 +132,15 @@ function nameOverlapsResult(placeName, displayName) {
   return placeWords.some((w) => resultWords.has(w));
 }
 
+let locationIqQueue = Promise.resolve();
+function withLocationIqRateLimit(fn) {
+  const run = locationIqQueue.then(() => fn());
+  locationIqQueue = run.catch(() => {}).then(() => sleep(550));
+  return run;
+}
+
 async function tryGeocodeUrl(url, placeName) {
-  const response = await fetchWithTimeout(url);
+  const response = await withLocationIqRateLimit(() => fetchWithTimeout(url));
   if (!response.ok) return null;
   const data = await response.json();
   if (!data || data.length === 0) return null;
@@ -154,31 +161,27 @@ async function geocodePlace(placeName, areaName, locationContext, destinationCen
     const attempts = [];
 
     if (areaName) {
-      attempts.push(`${cleanQuery}, ${areaName}, ${locationContext}`);
+      attempts.push({ query: `${cleanQuery}, ${areaName}, ${locationContext}`, bounded: true });
     }
-    attempts.push(`${cleanQuery}, ${locationContext}`);
+    attempts.push({ query: `${cleanQuery}, ${locationContext}`, bounded: true });
+    attempts.push({ query: `${cleanQuery}, ${locationContext}`, bounded: false });
 
-    for (const query of attempts) {
-      let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=in`;
-      if (destinationCenter) {
+    for (const attempt of attempts) {
+      let url = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(attempt.query)}&format=json&limit=1&countrycodes=in`;
+      if (attempt.bounded && destinationCenter) {
         const viewbox = buildViewbox(destinationCenter, 60);
         url += `&viewbox=${viewbox}&bounded=1`;
       }
 
-      let coords = await tryGeocodeUrl(url, cleanQuery);
+      const coords = await tryGeocodeUrl(url, cleanQuery);
+      if (!coords) continue;
 
-      if (!coords && destinationCenter) {
-        const unboundedUrl = `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(query)}&format=json&limit=1`;
-        coords = await tryGeocodeUrl(unboundedUrl, cleanQuery);
+      if (destinationCenter) {
+        const distanceKm = haversineDistanceKm(coords, destinationCenter);
+        if (distanceKm > 60) continue;
       }
 
-      if (coords) {
-        if (destinationCenter) {
-          const distanceKm = haversineDistanceKm(coords, destinationCenter);
-          if (distanceKm > 60) continue;
-        }
-        return coords;
-      }
+      return coords;
     }
   } catch (e) {
     console.log('[geocodePlace] failed for', placeName, ':', e.message);
